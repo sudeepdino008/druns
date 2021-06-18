@@ -1,3 +1,6 @@
+use druns::packet;
+
 fn main() {
-    println!("Hello, world!");
+    print!("starting from main");
+    packet::start();
 }

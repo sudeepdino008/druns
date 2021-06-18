@@ -2,5 +2,6 @@ a simple dns server in Rust, inspired by [EmilHernvall's guide](https://github.c
 
 TODOs:
 
-build a parser for request and response  
-write unit tests for the parser
+- [x] build a parser for request and response  
+- [x] write unit tests for the parser
+- add unit tests for failure scenario
