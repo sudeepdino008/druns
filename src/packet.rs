@@ -5,7 +5,7 @@ use PacketType::{Query, Response};
 pub fn start() {
     let mut buffer = BytePacketBuffer::new(String::from("response.txt"));
     let mut packet = Packet::new();
-    packet.read_packet(&mut buffer);
+    packet.read(&mut buffer);
     print!("the packet is {:#?}", packet);
 }
 
@@ -29,31 +29,41 @@ impl Packet {
         }
     }
 
-    pub fn read_packet(&mut self, buffer: &mut BytePacketBuffer) {
+    pub fn read(&mut self, buffer: &mut BytePacketBuffer) {
         self.header.read_header(buffer);
         (0..self.header.ques_c).for_each(|_| {
             let mut question = Question::new();
-            question.read_question(buffer);
+            question.read(buffer);
             self.questions.push(question);
         });
 
         (0..self.header.ans_c).for_each(|_| {
             let mut answer = Record::new();
-            answer.read_record(buffer);
+            answer.read(buffer);
             self.answers.push(answer);
         });
 
         (0..self.header.auth_c).for_each(|_| {
             let mut auth = Record::new();
-            auth.read_record(buffer);
+            auth.read(buffer);
             self.authority.push(auth);
         });
 
         (0..self.header.addi_c).for_each(|_| {
             let mut addi = Record::new();
-            addi.read_record(buffer);
+            addi.read(buffer);
             self.additional.push(addi);
         });
+    }
+}
+
+impl Packet {
+    pub fn write(&self, buffer: &mut BytePacketBuffer) {
+        self.header.write(buffer);
+        self.questions.iter().for_each(|q| q.write(buffer));
+        self.answers.iter().for_each(|a| a.write(buffer));
+        self.authority.iter().for_each(|a| a.write(buffer));
+        self.additional.iter().for_each(|a| a.write(buffer));
     }
 }
 
@@ -73,11 +83,11 @@ impl Question {
         }
     }
 
-    fn read_question(&mut self, buffer: &mut BytePacketBuffer) {
+    fn read(&mut self, buffer: &mut BytePacketBuffer) {
         // read the domain name
         let mut domain_name = String::new();
         while {
-            let length = buffer.read_byte().unwrap();
+            let length = buffer.read_u8().unwrap();
             let temp_name = buffer.read_string(length);
             domain_name = domain_name + &temp_name + if temp_name.is_empty() { "" } else { "." };
             length != 0
@@ -85,9 +95,22 @@ impl Question {
         self.name = domain_name;
 
         // qtype
-        self.qtype = buffer.read_2bytes().unwrap();
+        self.qtype = buffer.read_u16().unwrap();
         // class
-        self.class = buffer.read_2bytes().unwrap();
+        self.class = buffer.read_u16().unwrap();
+    }
+}
+
+impl Question {
+    fn write(&self, buffer: &mut BytePacketBuffer) {
+        self.name.split('.').for_each(|label| {
+            let len = label.len().try_into().unwrap();
+            buffer.write_u8(len);
+            buffer.write_string(label);
+        });
+
+        buffer.write_u16(self.qtype);
+        buffer.write_u16(self.class);
     }
 }
 
@@ -129,42 +152,13 @@ impl Record {
         }
     }
 
-    fn read_record(&mut self, buffer: &mut BytePacketBuffer) {
-        while {
-            let length = buffer.read_byte().unwrap();
-            if length & 0xC0 != 0 {
-                // jump directive
-                let following_byte = buffer.read_byte().unwrap() as u16;
-                let msb_removed_length = (length ^ 0xC0) as u16;
-                let jmp_position: u16 = following_byte + (msb_removed_length << 8);
-                self.name = self.read_name(buffer, jmp_position as usize);
-            }
-
-            length != 0
-        } {}
-
-        self.qtype = buffer.read_2bytes().unwrap();
-        self.class = buffer.read_2bytes().unwrap();
-        self.ttl = buffer.read_4bytes().unwrap();
-        self.length = buffer.read_2bytes().unwrap();
-        self.ip = buffer.read_4bytes().unwrap();
-    }
-
-    fn read_name(&mut self, buffer: &mut BytePacketBuffer, mut cpos: usize) -> String {
-        let mut domain_name = String::new();
-        while {
-            let length = buffer.read_byte_from(cpos).unwrap();
-            cpos += 1;
-            domain_name = domain_name + &buffer.read_string_from(length, cpos);
-            cpos += length as usize;
-            if length != 0 {
-                domain_name += ".";
-                true
-            } else {
-                false
-            }
-        } {}
-        domain_name
+    fn read(&mut self, buffer: &mut BytePacketBuffer) {
+        self.name = buffer.read_qname();
+        self.qtype = buffer.read_u16().unwrap();
+        self.class = buffer.read_u16().unwrap();
+        self.ttl = buffer.read_u32().unwrap();
+        self.length = buffer.read_u16().unwrap();
+        self.ip = buffer.read_u32().unwrap();
     }
 
     fn parse_ip(&self) -> [u8; 4] {
@@ -177,7 +171,18 @@ impl Record {
     }
 }
 
-#[derive(Debug)]
+impl Record {
+    fn write(&self, buffer: &mut BytePacketBuffer) {
+        buffer.write_qname(&self.name);
+        buffer.write_u16(self.qtype);
+        buffer.write_u16(self.class);
+        buffer.write_u32(self.ttl);
+        buffer.write_u16(self.length);
+        buffer.write_u32(self.ip);
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct Header {
     pub id: u16,
     pub qr: PacketType,
@@ -214,45 +219,50 @@ impl Header {
     }
 
     fn read_header(&mut self, buffer: &mut BytePacketBuffer) {
-        self.id = buffer.read_2bytes().unwrap();
-        let flags = buffer.read_2bytes().unwrap();
-        self.qr = if (flags >> 15) & 1 == 0 {
-            Query
-        } else {
-            Response
-        };
-
+        self.id = buffer.read_u16().unwrap();
+        let flags = buffer.read_u16().unwrap();
+        self.qr = ((flags >> 15) & 1).into();
         self.opcode = ((flags << 1) >> 12) as u8;
         self.authoritative = (flags << 5) >> 15 == 1;
         self.is_truncated = (flags << 6) >> 15 == 1;
         self.recursion_desired = (flags << 7) >> 15 == 1;
         self.recursion_available = (flags << 8) >> 15 == 1;
         self.reserved = ((flags << 9) >> 13) as u8;
-        self.rcode = Header::get_rcode(((flags << 12) >> 12) as u8);
+        self.rcode = ((flags << 12) >> 12).into();
 
-        self.ques_c = buffer.read_2bytes().unwrap();
-        self.ans_c = buffer.read_2bytes().unwrap();
-        self.auth_c = buffer.read_2bytes().unwrap();
-        self.addi_c = buffer.read_2bytes().unwrap();
+        self.ques_c = buffer.read_u16().unwrap();
+        self.ans_c = buffer.read_u16().unwrap();
+        self.auth_c = buffer.read_u16().unwrap();
+        self.addi_c = buffer.read_u16().unwrap();
+    }
+}
+
+impl Header {
+    fn write(&self, buffer: &mut BytePacketBuffer) {
+        print!("{}", format!("writing header -- id {}", self.id));
+        buffer.write_u16(self.id);
+
+        let mut flags = u16::from(&self.qr) << 15;
+        flags = ((flags >> 11) | self.opcode as u16) << 11;
+        flags = ((flags >> 10) | self.to_u16(self.authoritative)) << 10;
+        flags = ((flags >> 9) | self.to_u16(self.is_truncated)) << 9;
+        flags = ((flags >> 8) | self.to_u16(self.recursion_desired)) << 8;
+        flags = ((flags >> 7) | self.to_u16(self.recursion_available)) << 7;
+        flags = ((flags >> 6) | self.reserved as u16) << 6;
+        flags = flags | u16::from(&self.rcode);
+        buffer.write_u16(flags);
+
+        buffer.write_u16(self.ques_c);
+        buffer.write_u16(self.ans_c);
+        buffer.write_u16(self.auth_c);
+        buffer.write_u16(self.addi_c);
     }
 
-    fn get_rcode(val: u8) -> ResponseCode {
-        if val == 0 {
-            ResponseCode::NoError
-        } else if val == 1 {
-            ResponseCode::FormatErr
-        } else if val == 2 {
-            ResponseCode::ServFail
-        } else if val == 3 {
-            ResponseCode::NxDomain
-        } else if val == 4 {
-            ResponseCode::NotImp
-        } else if val == 5 {
-            ResponseCode::Refused
-        } else if val == 6 {
-            ResponseCode::NoData
+    fn to_u16(&self, val: bool) -> u16 {
+        if val {
+            1
         } else {
-            panic!("unknown response code val");
+            0
         }
     }
 }
@@ -261,6 +271,25 @@ impl Header {
 pub enum PacketType {
     Query,    // 0
     Response, // 1
+}
+
+impl From<u16> for PacketType {
+    fn from(val: u16) -> Self {
+        match val {
+            0 => PacketType::Query,
+            1 => PacketType::Response,
+            _ => panic!("unexpected value"),
+        }
+    }
+}
+
+impl From<&PacketType> for u16 {
+    fn from(val: &PacketType) -> Self {
+        match val {
+            PacketType::Query => 0,
+            PacketType::Response => 1,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -273,3 +302,38 @@ pub enum ResponseCode {
     Refused,
     NoData,
 }
+
+impl From<u16> for ResponseCode {
+    fn from(val: u16) -> ResponseCode {
+        match val {
+            0 => ResponseCode::NoError,
+            1 => ResponseCode::FormatErr,
+            2 => ResponseCode::ServFail,
+            3 => ResponseCode::NxDomain,
+            4 => ResponseCode::NotImp,
+            5 => ResponseCode::Refused,
+            6 => ResponseCode::NoData,
+            _ => panic!(format!("unknown response code {}", val)),
+        }
+    }
+}
+
+impl From<&ResponseCode> for u16 {
+    fn from(val: &ResponseCode) -> u16 {
+        match val {
+            NoError => 0,
+            FormatErr => 1,
+            ServFail => 2,
+            NxDoman => 3,
+            NotImp => 4,
+            Refused => 5,
+            NoData => 6,
+        }
+    }
+}
+
+// impl Into<ResponseCode> for u16 {
+//     fn into(self) -> ResponseCode {
+//         ResponseCode::NoError
+//     }
+// }

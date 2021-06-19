@@ -5,7 +5,7 @@ use druns::{buffer::BytePacketBuffer, packet::ResponseCode};
 fn test_parse_response_google() {
     let mut buffer = BytePacketBuffer::new(String::from("tests/google_response.txt"));
     let mut packet = Packet::new();
-    packet.read_packet(&mut buffer);
+    packet.read(&mut buffer);
     assert_eq!(packet.header.ques_c, 1);
     assert_eq!(packet.header.ans_c, 1);
     assert_eq!(packet.header.rcode, ResponseCode::NoError);
@@ -19,7 +19,7 @@ fn test_parse_response_google() {
 fn test_parse_request_google() {
     let mut buffer = BytePacketBuffer::new(String::from("tests/google_request.txt"));
     let mut packet = Packet::new();
-    packet.read_packet(&mut buffer);
+    packet.read(&mut buffer);
     assert_eq!(packet.header.ques_c, 1);
     assert_eq!(packet.header.ans_c, 0);
     assert_eq!(packet.header.rcode, ResponseCode::NoError);
@@ -32,7 +32,7 @@ fn test_parse_request_google() {
 fn test_parse_request_netflix() {
     let mut buffer = BytePacketBuffer::new(String::from("tests/netflix_request.txt"));
     let mut packet = Packet::new();
-    packet.read_packet(&mut buffer);
+    packet.read(&mut buffer);
     assert_eq!(packet.header.ques_c, 1);
     assert_eq!(packet.header.ans_c, 0);
     assert_eq!(packet.header.rcode, ResponseCode::NoError);
@@ -45,7 +45,7 @@ fn test_parse_request_netflix() {
 fn test_parse_response_netflix() {
     let mut buffer = BytePacketBuffer::new(String::from("tests/netflix_response.txt"));
     let mut packet = Packet::new();
-    packet.read_packet(&mut buffer);
+    packet.read(&mut buffer);
     assert_eq!(packet.header.ques_c, 1);
     assert_ne!(packet.header.ans_c, 0);
     assert_eq!(packet.header.rcode, ResponseCode::NoError);
