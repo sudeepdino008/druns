@@ -5,7 +5,24 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 pub struct BytePacketBuffer {
     buffer: [u8; 512],
-    pos: usize,
+    pub pos: usize,
+    pub size: usize,
+}
+
+impl std::ops::DerefMut for BytePacketBuffer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // much better to have a size, which keeps track of buffer usage
+        // rather than use pos, which can reset etc.
+        &mut self.buffer
+    }
+}
+
+impl std::ops::Deref for BytePacketBuffer {
+    type Target = [u8];
+
+    fn deref(&self) -> &Self::Target {
+        &self.buffer[0..self.size]
+    }
 }
 
 impl BytePacketBuffer {
@@ -19,14 +36,23 @@ impl BytePacketBuffer {
             buffer[i] = contents[i];
         });
 
-        BytePacketBuffer { buffer, pos: 0 }
+        BytePacketBuffer {
+            buffer,
+            pos: 0,
+            size: contents.len(),
+        }
     }
 
     pub fn new_empty() -> BytePacketBuffer {
         BytePacketBuffer {
             buffer: [0; 512],
             pos: 0,
+            size: 0,
         }
+    }
+
+    pub fn reset_for_read(&mut self) {
+        self.pos = 0;
     }
 }
 
@@ -126,6 +152,7 @@ impl BytePacketBuffer {
         }
         self.buffer[self.pos] = val;
         self.pos += 1;
+        self.size = self.pos;
         Ok(())
     }
 
@@ -134,6 +161,7 @@ impl BytePacketBuffer {
         let second_u8: u8 = ((val << 8) >> 8).try_into().unwrap();
         self.write_u8(first_u8)?;
         self.write_u8(second_u8)?;
+        self.size = self.pos;
         Ok(())
     }
 
@@ -142,6 +170,7 @@ impl BytePacketBuffer {
         let second_u16: u16 = ((val << 16) >> 16).try_into().unwrap();
         self.write_u16(first_u16)?;
         self.write_u16(second_u16)?;
+        self.size = self.pos;
         Ok(())
     }
 
@@ -154,6 +183,7 @@ impl BytePacketBuffer {
         }
         let destination_slice = &mut self.buffer[self.pos..self.pos + val.len()];
         destination_slice.copy_from_slice(val.as_bytes());
+        self.size = self.pos;
         Ok(())
     }
 
@@ -168,6 +198,7 @@ impl BytePacketBuffer {
             self.write_string(label);
         });
 
+        self.size = self.pos;
         Ok(())
     }
 }

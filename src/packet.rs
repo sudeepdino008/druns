@@ -1,12 +1,56 @@
-use super::buffer::BytePacketBuffer;
-use std::{convert::TryInto, fmt::Debug};
+use super::buffer::{BytePacketBuffer, Result};
+use std::{convert::TryInto, fmt::Debug, net::UdpSocket, time::Duration};
 use PacketType::{Query, Response};
 
-pub fn start() {
-    let mut buffer = BytePacketBuffer::new(String::from("response.txt"));
+pub fn start() -> Result<()> {
+    let qname = "google.com";
+    let qtype: u16 = 1; // A type
+    let server = "8.8.8.8:53";
+
     let mut packet = Packet::new();
-    packet.read(&mut buffer);
-    print!("the packet is {:#?}", packet);
+    // packet.header.id = 8888;
+    // packet.header.qr = PacketType::Query;
+    // packet.header.recursion_desired = true;
+    // packet.header.ques_c = 1;
+
+    // let mut ques = Question::new();
+    // ques.name = qname.to_string();
+    // packet.questions.push(ques);
+    let mut gbuffer = BytePacketBuffer::new("req.txt".to_string());
+
+    //issue is difference in packet size (39 vs 33)
+    print!("\ngbuf {}\n", gbuffer.size);
+    packet.read(&mut gbuffer);
+
+    print!("the packet is {:#?}\n", packet);
+    let mut buffer = BytePacketBuffer::new_empty();
+    packet.write(&mut buffer);
+    let socket = UdpSocket::bind(("0.0.0.0", 34254))?;
+
+    print!(
+        "buffer size {} {} {}\n",
+        buffer.size,
+        &buffer.len(),
+        gbuffer.size
+    );
+    socket.send_to(&buffer[0..buffer.size], server)?;
+    socket.set_read_timeout(Some(Duration::from_secs(10)));
+    print!(
+        "read timeout {}\n",
+        socket.read_timeout().unwrap().unwrap().as_secs()
+    );
+    let mut response_buf = BytePacketBuffer::new_empty();
+    let size_read = socket.recv_from(&mut response_buf[0..512]).unwrap();
+    print!("size_Read {}", size_read.0);
+    //    let mut response_packet = Packet::new();
+    //    response_packet.read(&mut response_buf);
+    //    print!("response packet is {:#?}", response_packet);
+    //let mut buffer = BytePacketBuffer::new(String::from("response.txt"));
+    //let mut packet = Packet::new();
+    //packet.read(&mut buffer);
+    //print!("the packet is {:#?}", packet);
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -30,6 +74,7 @@ impl Packet {
     }
 
     pub fn read(&mut self, buffer: &mut BytePacketBuffer) {
+        buffer.reset_for_read();
         self.header.read_header(buffer);
         (0..self.header.ques_c).for_each(|_| {
             let mut question = Question::new();
@@ -70,7 +115,7 @@ impl Packet {
 #[derive(Debug)]
 pub struct Question {
     pub name: String,
-    pub qtype: u16,
+    pub qtype: u16, // UNKNOWN type not handled
     pub class: u16,
 }
 
@@ -239,7 +284,6 @@ impl Header {
 
 impl Header {
     fn write(&self, buffer: &mut BytePacketBuffer) {
-        print!("{}", format!("writing header -- id {}", self.id));
         buffer.write_u16(self.id);
 
         let mut flags = u16::from(&self.qr) << 15;
