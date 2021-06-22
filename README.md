@@ -4,4 +4,7 @@ TODOs:
 
 - [x] build a parser for request and response  
 - [x] write unit tests for the parser
-- add unit tests for failure scenario
+- [x] send UDP requests 
+- [x] add unit tests for failure scenario
+- [] recursive resolution
+- [] CLI arguments
