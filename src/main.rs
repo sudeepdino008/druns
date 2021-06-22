@@ -1,6 +1,6 @@
 use druns::packet;
 
 fn main() {
-    print!("starting from main");
+    println!("starting from main");
     packet::start().unwrap();
 }

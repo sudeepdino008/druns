@@ -120,7 +120,7 @@ impl BytePacketBuffer {
             let jmp_position: u16 = following_byte + (msb_removed_length << 8);
             self.read_qname_from(jmp_position as usize).0
         } else {
-            let (qname, new_pos) = self.read_qname_from(self.pos);
+            let (qname, new_pos) = self.read_qname_from(self.pos - 1);
             self.pos = new_pos;
             qname
         }
@@ -161,7 +161,6 @@ impl BytePacketBuffer {
         let second_u8: u8 = ((val << 8) >> 8).try_into().unwrap();
         self.write_u8(first_u8)?;
         self.write_u8(second_u8)?;
-        self.size = self.pos;
         Ok(())
     }
 
@@ -170,7 +169,6 @@ impl BytePacketBuffer {
         let second_u16: u16 = ((val << 16) >> 16).try_into().unwrap();
         self.write_u16(first_u16)?;
         self.write_u16(second_u16)?;
-        self.size = self.pos;
         Ok(())
     }
 
@@ -183,6 +181,7 @@ impl BytePacketBuffer {
         }
         let destination_slice = &mut self.buffer[self.pos..self.pos + val.len()];
         destination_slice.copy_from_slice(val.as_bytes());
+        self.pos += val.len();
         self.size = self.pos;
         Ok(())
     }
@@ -190,15 +189,15 @@ impl BytePacketBuffer {
     pub fn write_qname(&mut self, val: &str) -> Result<()> {
         // TODO: implement jump directive here
         if val.is_empty() {
+            let _ = self.write_u8(0);
             return Ok(());
         }
 
         val.split('.').for_each(|label| {
-            self.write_u8(label.len().try_into().unwrap());
-            self.write_string(label);
+            let _ = self.write_u8(label.len().try_into().unwrap());
+            let _ = self.write_string(label);
         });
 
-        self.size = self.pos;
         Ok(())
     }
 }

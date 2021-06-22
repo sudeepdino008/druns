@@ -8,9 +8,9 @@ fn test_parse_response_google() {
     packet.read(&mut buffer);
     assert_eq!(packet.header.ques_c, 1);
     assert_eq!(packet.header.ans_c, 1);
-    assert_eq!(packet.header.rcode, ResponseCode::NoError);
+    assert_eq!(packet.header.rcode, ResponseCode::no_error);
     assert_eq!(packet.header.qr, PacketType::Response);
-
+    print!("{:#?}", packet);
     assert_eq!(packet.questions[0].name, packet.answers[0].name);
     check_counts(&packet);
 }
@@ -22,7 +22,7 @@ fn test_parse_request_google() {
     packet.read(&mut buffer);
     assert_eq!(packet.header.ques_c, 1);
     assert_eq!(packet.header.ans_c, 0);
-    assert_eq!(packet.header.rcode, ResponseCode::NoError);
+    assert_eq!(packet.header.rcode, ResponseCode::no_error);
     assert_eq!(packet.header.qr, PacketType::Query);
 
     check_counts(&packet);
@@ -35,9 +35,8 @@ fn test_parse_request_netflix() {
     packet.read(&mut buffer);
     assert_eq!(packet.header.ques_c, 1);
     assert_eq!(packet.header.ans_c, 0);
-    assert_eq!(packet.header.rcode, ResponseCode::NoError);
+    assert_eq!(packet.header.rcode, ResponseCode::no_error);
     assert_eq!(packet.header.qr, PacketType::Query);
-    print!("{:#?}", packet);
     check_counts(&packet);
 }
 
@@ -48,9 +47,8 @@ fn test_parse_response_netflix() {
     packet.read(&mut buffer);
     assert_eq!(packet.header.ques_c, 1);
     assert_ne!(packet.header.ans_c, 0);
-    assert_eq!(packet.header.rcode, ResponseCode::NoError);
+    assert_eq!(packet.header.rcode, ResponseCode::no_error);
     assert_eq!(packet.header.qr, PacketType::Response);
-    print!("{:#?}", packet);
     check_counts(&packet);
 }
 

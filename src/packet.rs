@@ -1,56 +1,56 @@
 use super::buffer::{BytePacketBuffer, Result};
 use std::{convert::TryInto, fmt::Debug, net::UdpSocket, time::Duration};
-use PacketType::{Query, Response};
 
 pub fn start() -> Result<()> {
-    let qname = "google.com";
-    let qtype: u16 = 1; // A type
+    //    let qname = "google.com";
+    //    let qtype: u16 = 1; // A type
     let server = "8.8.8.8:53";
 
-    let mut packet = Packet::new();
-    // packet.header.id = 8888;
-    // packet.header.qr = PacketType::Query;
-    // packet.header.recursion_desired = true;
-    // packet.header.ques_c = 1;
+    let packet = createRequestPacket();
+    //    let mut gbuffer = BytePacketBuffer::new("req.txt".to_string());
+    //   packet.read(&mut gbuffer);
 
-    // let mut ques = Question::new();
-    // ques.name = qname.to_string();
-    // packet.questions.push(ques);
-    let mut gbuffer = BytePacketBuffer::new("req.txt".to_string());
-
-    //issue is difference in packet size (39 vs 33)
-    print!("\ngbuf {}\n", gbuffer.size);
-    packet.read(&mut gbuffer);
-
-    print!("the packet is {:#?}\n", packet);
+    println!("the request packet is {:#?}", packet);
     let mut buffer = BytePacketBuffer::new_empty();
     packet.write(&mut buffer);
     let socket = UdpSocket::bind(("0.0.0.0", 34254))?;
 
-    print!(
-        "buffer size {} {} {}\n",
-        buffer.size,
-        &buffer.len(),
-        gbuffer.size
-    );
     socket.send_to(&buffer[0..buffer.size], server)?;
-    socket.set_read_timeout(Some(Duration::from_secs(10)));
-    print!(
-        "read timeout {}\n",
-        socket.read_timeout().unwrap().unwrap().as_secs()
-    );
+    socket.set_read_timeout(Some(Duration::from_secs(10)))?;
     let mut response_buf = BytePacketBuffer::new_empty();
-    let size_read = socket.recv_from(&mut response_buf[0..512]).unwrap();
-    print!("size_Read {}", size_read.0);
-    //    let mut response_packet = Packet::new();
-    //    response_packet.read(&mut response_buf);
-    //    print!("response packet is {:#?}", response_packet);
-    //let mut buffer = BytePacketBuffer::new(String::from("response.txt"));
-    //let mut packet = Packet::new();
-    //packet.read(&mut buffer);
-    //print!("the packet is {:#?}", packet);
+    let _ = socket.recv_from(&mut response_buf[0..512]).unwrap();
+    let mut response_packet = Packet::new();
+    response_packet.read(&mut response_buf);
+    println!("response packet is {:#?}", response_packet);
 
     Ok(())
+}
+
+pub fn createRequestPacket() -> Packet {
+    let mut packet = Packet::new();
+    let header = Header {
+        id: 8378,
+        qr: PacketType::Query,
+        opcode: 0,
+        authoritative: false,
+        is_truncated: false,
+        recursion_desired: true,
+        recursion_available: false,
+        reserved: 2,
+        rcode: ResponseCode::no_error,
+        ques_c: 1,
+        ans_c: 0,
+        auth_c: 0,
+        addi_c: 0,
+    };
+    packet.header = header;
+    packet.questions = vec![Question {
+        name: "www.yahoo.com.".to_string(),
+        qtype: 1,
+        class: 1,
+    }];
+
+    packet
 }
 
 #[derive(Debug)]
@@ -129,33 +129,17 @@ impl Question {
     }
 
     fn read(&mut self, buffer: &mut BytePacketBuffer) {
-        // read the domain name
-        let mut domain_name = String::new();
-        while {
-            let length = buffer.read_u8().unwrap();
-            let temp_name = buffer.read_string(length);
-            domain_name = domain_name + &temp_name + if temp_name.is_empty() { "" } else { "." };
-            length != 0
-        } {}
-        self.name = domain_name;
-
-        // qtype
+        self.name = buffer.read_qname();
         self.qtype = buffer.read_u16().unwrap();
-        // class
         self.class = buffer.read_u16().unwrap();
     }
 }
 
 impl Question {
     fn write(&self, buffer: &mut BytePacketBuffer) {
-        self.name.split('.').for_each(|label| {
-            let len = label.len().try_into().unwrap();
-            buffer.write_u8(len);
-            buffer.write_string(label);
-        });
-
-        buffer.write_u16(self.qtype);
-        buffer.write_u16(self.class);
+        let _ = buffer.write_qname(&self.name);
+        let _ = buffer.write_u16(self.qtype);
+        let _ = buffer.write_u16(self.class);
     }
 }
 
@@ -218,12 +202,12 @@ impl Record {
 
 impl Record {
     fn write(&self, buffer: &mut BytePacketBuffer) {
-        buffer.write_qname(&self.name);
-        buffer.write_u16(self.qtype);
-        buffer.write_u16(self.class);
-        buffer.write_u32(self.ttl);
-        buffer.write_u16(self.length);
-        buffer.write_u32(self.ip);
+        let _ = buffer.write_qname(&self.name);
+        let _ = buffer.write_u16(self.qtype);
+        let _ = buffer.write_u16(self.class);
+        let _ = buffer.write_u32(self.ttl);
+        let _ = buffer.write_u16(self.length);
+        let _ = buffer.write_u32(self.ip);
     }
 }
 
@@ -255,7 +239,7 @@ impl Header {
             recursion_desired: false,
             recursion_available: false,
             reserved: 0,
-            rcode: ResponseCode::NoError,
+            rcode: ResponseCode::no_error,
             ques_c: 0,
             ans_c: 0,
             auth_c: 0,
@@ -284,7 +268,7 @@ impl Header {
 
 impl Header {
     fn write(&self, buffer: &mut BytePacketBuffer) {
-        buffer.write_u16(self.id);
+        let _ = buffer.write_u16(self.id);
 
         let mut flags = u16::from(&self.qr) << 15;
         flags = ((flags >> 11) | self.opcode as u16) << 11;
@@ -292,14 +276,14 @@ impl Header {
         flags = ((flags >> 9) | self.to_u16(self.is_truncated)) << 9;
         flags = ((flags >> 8) | self.to_u16(self.recursion_desired)) << 8;
         flags = ((flags >> 7) | self.to_u16(self.recursion_available)) << 7;
-        flags = ((flags >> 6) | self.reserved as u16) << 6;
-        flags = flags | u16::from(&self.rcode);
-        buffer.write_u16(flags);
+        flags = ((flags >> 4) | self.reserved as u16) << 4;
+        flags |= u16::from(&self.rcode);
+        let _ = buffer.write_u16(flags);
 
-        buffer.write_u16(self.ques_c);
-        buffer.write_u16(self.ans_c);
-        buffer.write_u16(self.auth_c);
-        buffer.write_u16(self.addi_c);
+        let _ = buffer.write_u16(self.ques_c);
+        let _ = buffer.write_u16(self.ans_c);
+        let _ = buffer.write_u16(self.auth_c);
+        let _ = buffer.write_u16(self.addi_c);
     }
 
     fn to_u16(&self, val: bool) -> u16 {
@@ -337,27 +321,28 @@ impl From<&PacketType> for u16 {
 }
 
 #[derive(Debug, PartialEq)]
+#[allow(non_camel_case_types)]
 pub enum ResponseCode {
-    NoError, // no eror condition
-    FormatErr,
-    ServFail,
-    NxDomain,
-    NotImp,
-    Refused,
-    NoData,
+    no_error, // no eror condition
+    format_err,
+    serv_fail,
+    nx_domain,
+    not_imp,
+    refused,
+    no_data,
 }
 
 impl From<u16> for ResponseCode {
     fn from(val: u16) -> ResponseCode {
         match val {
-            0 => ResponseCode::NoError,
-            1 => ResponseCode::FormatErr,
-            2 => ResponseCode::ServFail,
-            3 => ResponseCode::NxDomain,
-            4 => ResponseCode::NotImp,
-            5 => ResponseCode::Refused,
-            6 => ResponseCode::NoData,
-            _ => panic!(format!("unknown response code {}", val)),
+            0 => ResponseCode::no_error,
+            1 => ResponseCode::format_err,
+            2 => ResponseCode::serv_fail,
+            3 => ResponseCode::nx_domain,
+            4 => ResponseCode::not_imp,
+            5 => ResponseCode::refused,
+            6 => ResponseCode::no_data,
+            _ => panic!("invalid response code"),
         }
     }
 }
@@ -365,19 +350,14 @@ impl From<u16> for ResponseCode {
 impl From<&ResponseCode> for u16 {
     fn from(val: &ResponseCode) -> u16 {
         match val {
-            NoError => 0,
-            FormatErr => 1,
-            ServFail => 2,
-            NxDoman => 3,
-            NotImp => 4,
-            Refused => 5,
-            NoData => 6,
+            ResponseCode::no_error => 0,
+            ResponseCode::format_err => 1,
+            ResponseCode::serv_fail => 2,
+            ResponseCode::nx_domain => 3,
+            ResponseCode::not_imp => 4,
+            ResponseCode::refused => 5,
+            ResponseCode::no_data => 6,
+            _ => panic!("unhandled response code {:?}", val),
         }
     }
 }
-
-// impl Into<ResponseCode> for u16 {
-//     fn into(self) -> ResponseCode {
-//         ResponseCode::NoError
-//     }
-// }
