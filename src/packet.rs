@@ -1,3 +1,5 @@
+use Record::A;
+
 use super::buffer::{BytePacketBuffer, Result};
 use std::{convert::TryInto, fmt::Debug, net::UdpSocket, time::Duration};
 
@@ -6,7 +8,7 @@ pub fn start() -> Result<()> {
     //    let qtype: u16 = 1; // A type
     let server = "8.8.8.8:53";
 
-    let packet = createRequestPacket();
+    let packet = create_request_packet();
     //    let mut gbuffer = BytePacketBuffer::new("req.txt".to_string());
     //   packet.read(&mut gbuffer);
 
@@ -26,7 +28,7 @@ pub fn start() -> Result<()> {
     Ok(())
 }
 
-pub fn createRequestPacket() -> Packet {
+pub fn create_request_packet() -> Packet {
     let mut packet = Packet::new();
     let header = Header {
         id: 8378,
@@ -45,7 +47,7 @@ pub fn createRequestPacket() -> Packet {
     };
     packet.header = header;
     packet.questions = vec![Question {
-        name: "www.yahoo.com.".to_string(),
+        name: "yahoo.com.".to_string(),
         qtype: 1,
         class: 1,
     }];
@@ -83,21 +85,15 @@ impl Packet {
         });
 
         (0..self.header.ans_c).for_each(|_| {
-            let mut answer = Record::new();
-            answer.read(buffer);
-            self.answers.push(answer);
+            self.answers.push(Record::read(buffer).unwrap());
         });
 
         (0..self.header.auth_c).for_each(|_| {
-            let mut auth = Record::new();
-            auth.read(buffer);
-            self.authority.push(auth);
+            self.authority.push(Record::read(buffer).unwrap());
         });
 
         (0..self.header.addi_c).for_each(|_| {
-            let mut addi = Record::new();
-            addi.read(buffer);
-            self.additional.push(addi);
+            self.additional.push(Record::read(buffer).unwrap());
         });
     }
 }
@@ -105,10 +101,18 @@ impl Packet {
 impl Packet {
     pub fn write(&self, buffer: &mut BytePacketBuffer) {
         self.header.write(buffer);
-        self.questions.iter().for_each(|q| q.write(buffer));
-        self.answers.iter().for_each(|a| a.write(buffer));
-        self.authority.iter().for_each(|a| a.write(buffer));
-        self.additional.iter().for_each(|a| a.write(buffer));
+        self.questions.iter().for_each(|a| {
+            a.write(buffer);
+        });
+        self.answers.iter().for_each(|a| {
+            a.write(buffer).unwrap();
+        });
+        self.authority.iter().for_each(|a| {
+            a.write(buffer).unwrap();
+        });
+        self.additional.iter().for_each(|a| {
+            a.write(buffer).unwrap();
+        });
     }
 }
 
@@ -143,73 +147,272 @@ impl Question {
     }
 }
 
-pub struct Record {
-    pub name: String,
-    pub qtype: u16,
-    pub class: u16,
-    pub ttl: u32,
-    pub length: u16,
-    pub ip: u32,
+#[derive(Eq, PartialEq, Clone)]
+pub enum Record {
+    A {
+        name: String,
+        class: u16,
+        ttl: u32,
+        ip: u32,
+    },
+    CNAME {
+        name: String,
+        class: u16,
+        host: String,
+        ttl: u32,
+    },
+    MX {
+        name: String,
+        class: u16,
+        priority: u16,
+        host: String,
+        ttl: u32,
+    },
+    UNKNOWN {
+        name: String,
+        rtype: u16,
+        class: u16,
+        ttl: u32,
+        length: u16,
+    },
 }
 
 impl Debug for Record {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ip_arr = self.parse_ip();
-        f.debug_struct("Record")
-            .field("name", &self.name)
-            .field("qtype", &self.qtype)
-            .field("class", &self.class)
-            .field("ttl", &self.ttl)
-            .field("length", &self.length)
-            .field(
-                "ip",
+        let mut mp = f.debug_map().entries(self);
+        //.entries(self.0.iter().map(|&(ref k, ref v)| (k, v)));
+
+        if let Record::A { ip, .. } = self {
+            let ip_arr = Record::parse_ip(*ip);
+            mp.entry(
+                &"ip-parsed",
                 &format!("{}.{}.{}.{}", ip_arr[0], ip_arr[1], ip_arr[2], ip_arr[3]),
-            )
-            .finish()
+            );
+        }
+
+        mp.finish()
     }
 }
 
 impl Record {
-    fn new() -> Record {
-        Record {
-            name: String::new(),
-            qtype: 0,
-            class: 0,
-            ttl: 0,
-            length: 0,
-            ip: 0,
+    fn read(buffer: &mut BytePacketBuffer) -> Result<Record> {
+        println!("buffer position is: {}", buffer.pos);
+        let name = buffer.read_qname();
+        println!("hostname is {} {}", name, buffer.pos);
+        let rtype = buffer.read_u16().unwrap();
+        let class = buffer.read_u16().unwrap();
+        let ttl = buffer.read_u32().unwrap();
+        let length = buffer.read_u16().unwrap();
+
+        println!(
+            "rtype is --{}--{}--{}--{}--{}",
+            name, rtype, class, ttl, length
+        );
+        match rtype {
+            1 => {
+                let ip = buffer.read_u32().unwrap();
+
+                Ok(A {
+                    name,
+                    class,
+                    ttl,
+                    ip,
+                })
+            }
+
+            5 => {
+                let host = buffer.read_qname();
+                Ok(Record::CNAME {
+                    name,
+                    class,
+                    host,
+                    ttl,
+                })
+            }
+
+            15 => {
+                let priority = buffer.read_u16().unwrap();
+                let host = buffer.read_qname();
+                Ok(Record::MX {
+                    name,
+                    class,
+                    priority,
+                    host,
+                    ttl,
+                })
+            }
+
+            _ => Ok(Record::UNKNOWN {
+                name,
+                rtype,
+                class,
+                ttl,
+                length,
+            }),
         }
     }
 
-    fn read(&mut self, buffer: &mut BytePacketBuffer) {
-        self.name = buffer.read_qname();
-        self.qtype = buffer.read_u16().unwrap();
-        self.class = buffer.read_u16().unwrap();
-        self.ttl = buffer.read_u32().unwrap();
-        self.length = buffer.read_u16().unwrap();
-        self.ip = buffer.read_u32().unwrap();
-    }
-
-    fn parse_ip(&self) -> [u8; 4] {
+    fn parse_ip(ip: u32) -> [u8; 4] {
         [
-            (self.ip >> 24).try_into().unwrap(),
-            ((self.ip << 8) >> 24).try_into().unwrap(),
-            ((self.ip << 16) >> 24).try_into().unwrap(),
-            ((self.ip << 24) >> 24).try_into().unwrap(),
+            (ip >> 24).try_into().unwrap(),
+            ((ip << 8) >> 24).try_into().unwrap(),
+            ((ip << 16) >> 24).try_into().unwrap(),
+            ((ip << 24) >> 24).try_into().unwrap(),
         ]
     }
 }
 
 impl Record {
-    fn write(&self, buffer: &mut BytePacketBuffer) {
-        let _ = buffer.write_qname(&self.name);
-        let _ = buffer.write_u16(self.qtype);
-        let _ = buffer.write_u16(self.class);
-        let _ = buffer.write_u32(self.ttl);
-        let _ = buffer.write_u16(self.length);
-        let _ = buffer.write_u32(self.ip);
+    fn write(&self, buffer: &mut BytePacketBuffer) -> Result<usize> {
+        match self {
+            Record::A {
+                name,
+                class,
+                ttl,
+                ip,
+            } => {
+                buffer.write_qname(&name)?;
+                buffer.write_u16(self.to_num())?;
+                buffer.write_u16(*class)?;
+                buffer.write_u32(*ttl)?;
+                buffer.write_u16(4)?;
+                buffer.write_u32(*ip)?;
+            }
+
+            Record::CNAME {
+                name,
+                class,
+                host,
+                ttl,
+            } => {
+                buffer.write_qname(&name)?;
+                buffer.write_u16(self.to_num())?;
+                buffer.write_u16(*class)?;
+                buffer.write_u32(*ttl)?;
+
+                let pos = buffer.pos;
+                buffer.write_u16(0)?; //length
+                buffer.write_qname(&host)?;
+                let size = buffer.pos - pos - 2;
+                buffer.set_u16(size as u16, pos)?;
+            }
+
+            Record::MX {
+                name,
+                class,
+                priority,
+                host,
+                ttl,
+            } => {
+                buffer.write_qname(&name)?;
+                buffer.write_u16(self.to_num())?;
+                buffer.write_u16(*class)?;
+                buffer.write_u32(*ttl)?;
+
+                let pos = buffer.pos;
+                buffer.write_u16(0)?;
+                buffer.write_u16(*priority)?;
+                buffer.write_qname(&host)?;
+
+                let size = buffer.pos - pos - 2;
+                buffer.set_u16(size as u16, pos)?;
+            }
+
+            Record::UNKNOWN {
+                name,
+                rtype,
+                class,
+                ttl,
+                length,
+            } => {
+                buffer.write_qname(&name)?;
+                buffer.write_u16(*rtype)?;
+                buffer.write_u16(*class)?;
+                buffer.write_u32(*ttl)?;
+                buffer.write_u16(*length)?;
+            }
+        }
+
+        Ok(0)
+    }
+
+    pub fn to_num(&self) -> u16 {
+        match *self {
+            Record::A { .. } => 1,
+            Record::CNAME { .. } => 5,
+            Record::MX { .. } => 15,
+            Record::UNKNOWN { rtype, .. } => rtype,
+        }
     }
 }
+
+// pub struct Record {
+//     pub name: String,
+//     //    pub qtype: u16,
+//     pub class: u16,
+//     pub ttl: u32,
+//     pub length: u16,
+//     //  pub ip: u32,
+// }
+
+// impl Debug for Record {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         let ip_arr = self.parse_ip();
+//         f.debug_struct("Record")
+//             .field("name", &self.name)
+//             .field("qtype", &self.qtype)
+//             .field("class", &self.class)
+//             .field("ttl", &self.ttl)
+//             .field("length", &self.length)
+//             .field(
+//                 "ip",
+//                 &format!("{}.{}.{}.{}", ip_arr[0], ip_arr[1], ip_arr[2], ip_arr[3]),
+//             )
+//             .finish()
+//     }
+// }
+
+// impl Record {
+//     fn new() -> Record {
+//         Record {
+//             name: String::new(),
+//             qtype: 0,
+//             class: 0,
+//             ttl: 0,
+//             length: 0,
+//             ip: 0,
+//         }
+//     }
+
+//     fn read(&mut self, buffer: &mut BytePacketBuffer) {
+//         self.name = buffer.read_qname();
+//         self.qtype = buffer.read_u16().unwrap();
+//         self.class = buffer.read_u16().unwrap();
+//         self.ttl = buffer.read_u32().unwrap();
+//         self.length = buffer.read_u16().unwrap();
+//         self.ip = buffer.read_u32().unwrap();
+//     }
+
+//     fn parse_ip(&self) -> [u8; 4] {
+//         [
+//             (self.ip >> 24).try_into().unwrap(),
+//             ((self.ip << 8) >> 24).try_into().unwrap(),
+//             ((self.ip << 16) >> 24).try_into().unwrap(),
+//             ((self.ip << 24) >> 24).try_into().unwrap(),
+//         ]
+//     }
+// }
+
+// impl Record {
+//     fn write(&self, buffer: &mut BytePacketBuffer) {
+//         let _ = buffer.write_qname(&self.name);
+//         let _ = buffer.write_u16(self.qtype);
+//         let _ = buffer.write_u16(self.class);
+//         let _ = buffer.write_u32(self.ttl);
+//         let _ = buffer.write_u16(self.length);
+//         let _ = buffer.write_u32(self.ip);
+//     }
+// }
 
 #[derive(Debug, PartialEq)]
 pub struct Header {

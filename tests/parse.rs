@@ -11,7 +11,12 @@ fn test_parse_response_google() {
     assert_eq!(packet.header.rcode, ResponseCode::no_error);
     assert_eq!(packet.header.qr, PacketType::Response);
     print!("{:#?}", packet);
-    assert_eq!(packet.questions[0].name, packet.answers[0].name);
+    match &packet.answers[0] {
+        druns::packet::Record::A { name, .. } => {
+            assert_eq!(&packet.questions[0].name, name);
+        }
+        _ => panic!("unexpected record type"),
+    }
     check_counts(&packet);
 }
 
@@ -24,7 +29,7 @@ fn test_parse_request_google() {
     assert_eq!(packet.header.ans_c, 0);
     assert_eq!(packet.header.rcode, ResponseCode::no_error);
     assert_eq!(packet.header.qr, PacketType::Query);
-
+    print!("{:#?}", packet);
     check_counts(&packet);
 }
 

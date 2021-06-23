@@ -140,6 +140,7 @@ impl BytePacketBuffer {
                 false
             }
         } {}
+
         (qname, cpos)
     }
 }
@@ -198,6 +199,16 @@ impl BytePacketBuffer {
             let _ = self.write_string(label);
         });
 
+        Ok(())
+    }
+
+    pub fn set_u16(&mut self, val: u16, pos: usize) -> Result<()> {
+        if pos < 0 || pos > 510 {
+            return Err(format!("invalid range {}", pos).into());
+        }
+
+        self.buffer[pos] = (val >> 8) as u8;
+        self.buffer[pos + 1] = ((val << 8) >> 8) as u8;
         Ok(())
     }
 }
