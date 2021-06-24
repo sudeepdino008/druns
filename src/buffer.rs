@@ -66,7 +66,7 @@ impl BytePacketBuffer {
 
     pub fn read_u8_from(&mut self, cpos: usize) -> Result<u8> {
         if cpos >= 511 {
-            Err("overflow".into())
+            Err(format!("overflow {}", cpos).into())
         } else {
             Ok(self.buffer[cpos])
         }
@@ -112,27 +112,30 @@ impl BytePacketBuffer {
     }
 
     pub fn read_qname(&mut self) -> String {
-        let length = self.read_u8().unwrap();
-        if length & 0xC0 != 0 {
-            // jump directive
-            let following_byte = self.read_u8().unwrap() as u16;
-            let msb_removed_length = (length ^ 0xC0) as u16;
-            let jmp_position: u16 = following_byte + (msb_removed_length << 8);
-            self.read_qname_from(jmp_position as usize).0
-        } else {
-            let (qname, new_pos) = self.read_qname_from(self.pos - 1);
-            self.pos = new_pos;
-            qname
-        }
+        let (qname, new_pos) = self.read_qname_from(self.pos);
+        self.pos = new_pos;
+        qname
     }
 
     pub fn read_qname_from(&mut self, mut cpos: usize) -> (String, usize) {
         let mut qname = String::new();
         while {
-            let length = self.read_u8_from(cpos).unwrap();
+            let mut length = self.read_u8_from(cpos).unwrap();
             cpos += 1;
-            qname = qname + &self.read_string_from(length, cpos);
-            cpos += length as usize;
+            if length & 0xC0 != 0 {
+                // jump directive
+                let following_byte = self.read_u8_from(cpos).unwrap() as u16;
+                cpos += 1;
+                let msb_removed_length = (length ^ 0xC0) as u16;
+                let jmp_position: u16 = following_byte + (msb_removed_length << 8);
+                let (jmp_name, _) = self.read_qname_from(jmp_position as usize);
+                qname = qname + &jmp_name;
+                length = 0; // exit
+            } else {
+                qname = qname + &self.read_string_from(length, cpos);
+                cpos += length as usize;
+            }
+
             if length != 0 {
                 qname += ".";
                 true
@@ -203,7 +206,7 @@ impl BytePacketBuffer {
     }
 
     pub fn set_u16(&mut self, val: u16, pos: usize) -> Result<()> {
-        if pos < 0 || pos > 510 {
+        if pos > 510 {
             return Err(format!("invalid range {}", pos).into());
         }
 

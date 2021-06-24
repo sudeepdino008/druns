@@ -4,13 +4,9 @@ use super::buffer::{BytePacketBuffer, Result};
 use std::{convert::TryInto, fmt::Debug, net::UdpSocket, time::Duration};
 
 pub fn start() -> Result<()> {
-    //    let qname = "google.com";
-    //    let qtype: u16 = 1; // A type
     let server = "8.8.8.8:53";
 
     let packet = create_request_packet();
-    //    let mut gbuffer = BytePacketBuffer::new("req.txt".to_string());
-    //   packet.read(&mut gbuffer);
 
     println!("the request packet is {:#?}", packet);
     let mut buffer = BytePacketBuffer::new_empty();
@@ -48,7 +44,7 @@ pub fn create_request_packet() -> Packet {
     packet.header = header;
     packet.questions = vec![Question {
         name: "yahoo.com.".to_string(),
-        qtype: 1,
+        qtype: 15,
         class: 1,
     }];
 
@@ -147,13 +143,13 @@ impl Question {
     }
 }
 
-#[derive(Eq, PartialEq, Clone)]
+#[derive(Eq, Debug, PartialEq, Clone)]
 pub enum Record {
     A {
         name: String,
         class: u16,
         ttl: u32,
-        ip: u32,
+        ip: [u8; 4],
     },
     CNAME {
         name: String,
@@ -177,37 +173,14 @@ pub enum Record {
     },
 }
 
-impl Debug for Record {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut mp = f.debug_map().entries(self);
-        //.entries(self.0.iter().map(|&(ref k, ref v)| (k, v)));
-
-        if let Record::A { ip, .. } = self {
-            let ip_arr = Record::parse_ip(*ip);
-            mp.entry(
-                &"ip-parsed",
-                &format!("{}.{}.{}.{}", ip_arr[0], ip_arr[1], ip_arr[2], ip_arr[3]),
-            );
-        }
-
-        mp.finish()
-    }
-}
-
 impl Record {
     fn read(buffer: &mut BytePacketBuffer) -> Result<Record> {
-        println!("buffer position is: {}", buffer.pos);
         let name = buffer.read_qname();
-        println!("hostname is {} {}", name, buffer.pos);
         let rtype = buffer.read_u16().unwrap();
         let class = buffer.read_u16().unwrap();
         let ttl = buffer.read_u32().unwrap();
         let length = buffer.read_u16().unwrap();
 
-        println!(
-            "rtype is --{}--{}--{}--{}--{}",
-            name, rtype, class, ttl, length
-        );
         match rtype {
             1 => {
                 let ip = buffer.read_u32().unwrap();
@@ -216,7 +189,7 @@ impl Record {
                     name,
                     class,
                     ttl,
-                    ip,
+                    ip: Record::parse_ip(ip),
                 })
             }
 
@@ -276,7 +249,10 @@ impl Record {
                 buffer.write_u16(*class)?;
                 buffer.write_u32(*ttl)?;
                 buffer.write_u16(4)?;
-                buffer.write_u32(*ip)?;
+                buffer.write_u8(ip[0])?;
+                buffer.write_u8(ip[1])?;
+                buffer.write_u8(ip[2])?;
+                buffer.write_u8(ip[3])?;
             }
 
             Record::CNAME {
