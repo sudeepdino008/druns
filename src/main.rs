@@ -1,6 +1,6 @@
-use druns::packet;
+use druns::lookup;
 
 fn main() {
     println!("starting from main");
-    packet::start().unwrap();
+    lookup::start().unwrap();
 }

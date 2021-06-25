@@ -1,55 +1,7 @@
 use Record::A;
 
 use super::buffer::{BytePacketBuffer, Result};
-use std::{convert::TryInto, fmt::Debug, net::UdpSocket, time::Duration};
-
-pub fn start() -> Result<()> {
-    let server = "8.8.8.8:53";
-
-    let packet = create_request_packet();
-
-    println!("the request packet is {:#?}", packet);
-    let mut buffer = BytePacketBuffer::new_empty();
-    packet.write(&mut buffer);
-    let socket = UdpSocket::bind(("0.0.0.0", 34254))?;
-
-    socket.send_to(&buffer[0..buffer.size], server)?;
-    socket.set_read_timeout(Some(Duration::from_secs(10)))?;
-    let mut response_buf = BytePacketBuffer::new_empty();
-    let _ = socket.recv_from(&mut response_buf[0..512]).unwrap();
-    let mut response_packet = Packet::new();
-    response_packet.read(&mut response_buf);
-    println!("response packet is {:#?}", response_packet);
-
-    Ok(())
-}
-
-pub fn create_request_packet() -> Packet {
-    let mut packet = Packet::new();
-    let header = Header {
-        id: 8378,
-        qr: PacketType::Query,
-        opcode: 0,
-        authoritative: false,
-        is_truncated: false,
-        recursion_desired: true,
-        recursion_available: false,
-        reserved: 2,
-        rcode: ResponseCode::no_error,
-        ques_c: 1,
-        ans_c: 0,
-        auth_c: 0,
-        addi_c: 0,
-    };
-    packet.header = header;
-    packet.questions = vec![Question {
-        name: "yahoo.com.".to_string(),
-        qtype: 15,
-        class: 1,
-    }];
-
-    packet
-}
+use std::{convert::TryInto, fmt::Debug};
 
 #[derive(Debug)]
 pub struct Packet {
@@ -115,7 +67,7 @@ impl Packet {
 #[derive(Debug)]
 pub struct Question {
     pub name: String,
-    pub qtype: u16, // UNKNOWN type not handled
+    pub qtype: QueryType, // UNKNOWN type not handled
     pub class: u16,
 }
 
@@ -123,14 +75,14 @@ impl Question {
     fn new() -> Question {
         Question {
             name: String::from(""),
-            qtype: 0,
+            qtype: QueryType::UNKNOWN(0),
             class: 0,
         }
     }
 
     fn read(&mut self, buffer: &mut BytePacketBuffer) {
         self.name = buffer.read_qname();
-        self.qtype = buffer.read_u16().unwrap();
+        self.qtype = QueryType::from_num(buffer.read_u16().unwrap());
         self.class = buffer.read_u16().unwrap();
     }
 }
@@ -138,8 +90,44 @@ impl Question {
 impl Question {
     fn write(&self, buffer: &mut BytePacketBuffer) {
         let _ = buffer.write_qname(&self.name);
-        let _ = buffer.write_u16(self.qtype);
+        let _ = buffer.write_u16(self.qtype.to_num());
         let _ = buffer.write_u16(self.class);
+    }
+}
+
+pub enum QueryType {
+    A,
+    NS,
+    CNAME,
+    MX,
+    UNKNOWN(u16),
+}
+
+impl QueryType {
+    pub fn to_num(&self) -> u16 {
+        match *self {
+            QueryType::A => 1,
+            QueryType::NS => 2,
+            QueryType::CNAME => 5,
+            QueryType::MX => 15,
+            QueryType::UNKNOWN(x) => x,
+        }
+    }
+
+    pub fn from_num(val: u16) -> QueryType {
+        match val {
+            1 => QueryType::A,
+            2 => QueryType::NS,
+            5 => QueryType::CNAME,
+            15 => QueryType::MX,
+            x => QueryType::UNKNOWN(x),
+        }
+    }
+}
+
+impl Debug for QueryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.to_num().to_string())
     }
 }
 
@@ -150,6 +138,12 @@ pub enum Record {
         class: u16,
         ttl: u32,
         ip: [u8; 4],
+    },
+    NS {
+        name: String,
+        class: u16,
+        ttl: u32,
+        host: String,
     },
     CNAME {
         name: String,
@@ -190,6 +184,16 @@ impl Record {
                     class,
                     ttl,
                     ip: Record::parse_ip(ip),
+                })
+            }
+
+            2 => {
+                let host = buffer.read_qname();
+                Ok(Record::NS {
+                    name,
+                    class,
+                    ttl,
+                    host,
                 })
             }
 
@@ -255,6 +259,25 @@ impl Record {
                 buffer.write_u8(ip[3])?;
             }
 
+            Record::NS {
+                name,
+                class,
+                ttl,
+                host,
+            } => {
+                buffer.write_qname(&name)?;
+                buffer.write_u16(self.to_num())?;
+                buffer.write_u16(*class)?;
+                buffer.write_u32(*ttl)?;
+
+                let pos = buffer.pos;
+                buffer.write_u16(0)?;
+                buffer.write_qname(&host)?;
+
+                let size = buffer.pos - pos;
+                buffer.set_u16(size as u16, pos)?;
+            }
+
             Record::CNAME {
                 name,
                 class,
@@ -315,80 +338,13 @@ impl Record {
     pub fn to_num(&self) -> u16 {
         match *self {
             Record::A { .. } => 1,
+            Record::NS { .. } => 2,
             Record::CNAME { .. } => 5,
             Record::MX { .. } => 15,
             Record::UNKNOWN { rtype, .. } => rtype,
         }
     }
 }
-
-// pub struct Record {
-//     pub name: String,
-//     //    pub qtype: u16,
-//     pub class: u16,
-//     pub ttl: u32,
-//     pub length: u16,
-//     //  pub ip: u32,
-// }
-
-// impl Debug for Record {
-//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//         let ip_arr = self.parse_ip();
-//         f.debug_struct("Record")
-//             .field("name", &self.name)
-//             .field("qtype", &self.qtype)
-//             .field("class", &self.class)
-//             .field("ttl", &self.ttl)
-//             .field("length", &self.length)
-//             .field(
-//                 "ip",
-//                 &format!("{}.{}.{}.{}", ip_arr[0], ip_arr[1], ip_arr[2], ip_arr[3]),
-//             )
-//             .finish()
-//     }
-// }
-
-// impl Record {
-//     fn new() -> Record {
-//         Record {
-//             name: String::new(),
-//             qtype: 0,
-//             class: 0,
-//             ttl: 0,
-//             length: 0,
-//             ip: 0,
-//         }
-//     }
-
-//     fn read(&mut self, buffer: &mut BytePacketBuffer) {
-//         self.name = buffer.read_qname();
-//         self.qtype = buffer.read_u16().unwrap();
-//         self.class = buffer.read_u16().unwrap();
-//         self.ttl = buffer.read_u32().unwrap();
-//         self.length = buffer.read_u16().unwrap();
-//         self.ip = buffer.read_u32().unwrap();
-//     }
-
-//     fn parse_ip(&self) -> [u8; 4] {
-//         [
-//             (self.ip >> 24).try_into().unwrap(),
-//             ((self.ip << 8) >> 24).try_into().unwrap(),
-//             ((self.ip << 16) >> 24).try_into().unwrap(),
-//             ((self.ip << 24) >> 24).try_into().unwrap(),
-//         ]
-//     }
-// }
-
-// impl Record {
-//     fn write(&self, buffer: &mut BytePacketBuffer) {
-//         let _ = buffer.write_qname(&self.name);
-//         let _ = buffer.write_u16(self.qtype);
-//         let _ = buffer.write_u16(self.class);
-//         let _ = buffer.write_u32(self.ttl);
-//         let _ = buffer.write_u16(self.length);
-//         let _ = buffer.write_u32(self.ip);
-//     }
-// }
 
 #[derive(Debug, PartialEq)]
 pub struct Header {
@@ -536,7 +492,6 @@ impl From<&ResponseCode> for u16 {
             ResponseCode::not_imp => 4,
             ResponseCode::refused => 5,
             ResponseCode::no_data => 6,
-            _ => panic!("unhandled response code {:?}", val),
         }
     }
 }
