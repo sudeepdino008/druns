@@ -1,7 +1,7 @@
 use Record::A;
 
 use super::buffer::{BytePacketBuffer, Result};
-use std::{convert::TryInto, fmt::Debug};
+use std::{convert::TryInto, fmt::Debug, net::Ipv6Addr};
 
 #[derive(Debug)]
 pub struct Packet {
@@ -100,6 +100,7 @@ pub enum QueryType {
     NS,
     CNAME,
     MX,
+    AAAA,
     UNKNOWN(u16),
 }
 
@@ -110,6 +111,7 @@ impl QueryType {
             QueryType::NS => 2,
             QueryType::CNAME => 5,
             QueryType::MX => 15,
+            QueryType::AAAA => 28,
             QueryType::UNKNOWN(x) => x,
         }
     }
@@ -120,6 +122,7 @@ impl QueryType {
             2 => QueryType::NS,
             5 => QueryType::CNAME,
             15 => QueryType::MX,
+            28 => QueryType::AAAA,
             x => QueryType::UNKNOWN(x),
         }
     }
@@ -157,6 +160,12 @@ pub enum Record {
         priority: u16,
         host: String,
         ttl: u32,
+    },
+    AAAA {
+        name: String,
+        class: u16,
+        ttl: u32,
+        ip: Ipv6Addr,
     },
     UNKNOWN {
         name: String,
@@ -218,6 +227,22 @@ impl Record {
                     ttl,
                 })
             }
+
+            28 => Ok(Record::AAAA {
+                name,
+                class,
+                ttl,
+                ip: Ipv6Addr::new(
+                    buffer.read_u16().unwrap(),
+                    buffer.read_u16().unwrap(),
+                    buffer.read_u16().unwrap(),
+                    buffer.read_u16().unwrap(),
+                    buffer.read_u16().unwrap(),
+                    buffer.read_u16().unwrap(),
+                    buffer.read_u16().unwrap(),
+                    buffer.read_u16().unwrap(),
+                ),
+            }),
 
             _ => Ok(Record::UNKNOWN {
                 name,
@@ -317,6 +342,20 @@ impl Record {
                 buffer.set_u16(size as u16, pos)?;
             }
 
+            Record::AAAA {
+                name,
+                class,
+                ttl,
+                ip,
+            } => {
+                buffer.write_qname(&name)?;
+                buffer.write_u16(*class)?;
+                buffer.write_u32(*ttl)?;
+                ip.octets()
+                    .iter()
+                    .for_each(|x| buffer.write_u8(*x).unwrap());
+            }
+
             Record::UNKNOWN {
                 name,
                 rtype,
@@ -341,6 +380,7 @@ impl Record {
             Record::NS { .. } => 2,
             Record::CNAME { .. } => 5,
             Record::MX { .. } => 15,
+            Record::AAAA { .. } => 28,
             Record::UNKNOWN { rtype, .. } => rtype,
         }
     }

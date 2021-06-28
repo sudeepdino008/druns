@@ -1,7 +1,7 @@
 use super::buffer::{BytePacketBuffer, Result};
 use super::packet::{Header, Packet, PacketType, QueryType, Question, Record, ResponseCode};
 use std::{
-    net::{IpAddr, Ipv4Addr, UdpSocket},
+    net::{Ipv4Addr, UdpSocket},
     str::FromStr,
 };
 
@@ -79,8 +79,9 @@ fn resolve(
     request_packet: &Packet,
 ) -> Result<Option<Packet>> {
     for server in servers.iter() {
-        println!("trying server {}", server);
+        //println!("trying server {}", server);
         let pck = lookup(socket, *server, request_packet)?;
+        //println!("packet {:#?}", pck);
         if !pck.answers.is_empty() {
             return Ok(Some(pck));
         }
@@ -94,8 +95,9 @@ fn resolve(
                 _ => panic!("should have been filtered out"),
             })
             .collect();
+        //println!("servers size {}", servers.len());
         if !servers.is_empty() {
-            resolve(socket, servers.as_slice(), request_packet)?;
+            return resolve(socket, servers.as_slice(), request_packet);
         }
     }
 
