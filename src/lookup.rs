@@ -43,15 +43,6 @@ fn handle_query(socket: &UdpSocket) -> Result<()> {
 
     let opt_response = resolve(socket, root_ipv4.as_slice(), &packet)?;
 
-    // let mut req_buffer = BytePacketBuffer::new_empty();
-    // packet.write(&mut req_buffer);
-
-    // socket.send_to(&req_buffer[0..req_buffer.size], server)?;
-    // //    socket.set_read_timeout(Some(Duration::from_secs(10)))?;
-    // let mut response_buf = BytePacketBuffer::new_empty();
-    // let (size, _) = socket.recv_from(&mut response_buf)?;
-    // response_buf.size = size; // that's why it's a bad idea to allow Deref of the BytePacketBuffer (it gives ability to directly manipulate buffer, without changing size)
-
     println!("response: {:#?}", opt_response);
     if let Some(response) = opt_response {
         let mut response_buf = BytePacketBuffer::new_empty();
@@ -63,13 +54,6 @@ fn handle_query(socket: &UdpSocket) -> Result<()> {
     }
     // TODO: in case of failure, no proper response is being sent to the server
 
-    // if !response_packet.authority.is_empty() {
-    //     println!("authoritative: {:#?}", response_packet.authority);
-    // }
-    // if !response_packet.additional.is_empty() {
-    //     println!("additional: {:#?}", response_packet.additional);
-    // }
-
     Ok(())
 }
 
@@ -79,9 +63,9 @@ fn resolve(
     request_packet: &Packet,
 ) -> Result<Option<Packet>> {
     for server in servers.iter() {
-        //println!("trying server {}", server);
+        println!("trying server {}", server);
         let pck = lookup(socket, *server, request_packet)?;
-        //println!("packet {:#?}", pck);
+        println!("packet {:#?}", pck);
         if !pck.answers.is_empty() {
             return Ok(Some(pck));
         }
@@ -91,11 +75,10 @@ fn resolve(
             .iter()
             .filter(|x| matches!(x, Record::A { .. }))
             .map(|server| match server {
-                Record::A { ip, .. } => Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]),
+                Record::A { ip, .. } => *ip,
                 _ => panic!("should have been filtered out"),
             })
             .collect();
-        //println!("servers size {}", servers.len());
         if !servers.is_empty() {
             return resolve(socket, servers.as_slice(), request_packet);
         }

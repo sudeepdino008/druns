@@ -1,7 +1,10 @@
 use Record::A;
 
 use super::buffer::{BytePacketBuffer, Result};
-use std::{convert::TryInto, fmt::Debug, net::Ipv6Addr};
+use std::{
+    fmt::Debug,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 #[derive(Debug)]
 pub struct Packet {
@@ -140,7 +143,7 @@ pub enum Record {
         name: String,
         class: u16,
         ttl: u32,
-        ip: [u8; 4],
+        ip: Ipv4Addr,
     },
     NS {
         name: String,
@@ -185,16 +188,17 @@ impl Record {
         let length = buffer.read_u16().unwrap();
 
         match rtype {
-            1 => {
-                let ip = buffer.read_u32().unwrap();
-
-                Ok(A {
-                    name,
-                    class,
-                    ttl,
-                    ip: Record::parse_ip(ip),
-                })
-            }
+            1 => Ok(A {
+                name,
+                class,
+                ttl,
+                ip: Ipv4Addr::new(
+                    buffer.read_u8().unwrap(),
+                    buffer.read_u8().unwrap(),
+                    buffer.read_u8().unwrap(),
+                    buffer.read_u8().unwrap(),
+                ),
+            }),
 
             2 => {
                 let host = buffer.read_qname();
@@ -253,15 +257,6 @@ impl Record {
             }),
         }
     }
-
-    fn parse_ip(ip: u32) -> [u8; 4] {
-        [
-            (ip >> 24).try_into().unwrap(),
-            ((ip << 8) >> 24).try_into().unwrap(),
-            ((ip << 16) >> 24).try_into().unwrap(),
-            ((ip << 24) >> 24).try_into().unwrap(),
-        ]
-    }
 }
 
 impl Record {
@@ -278,10 +273,7 @@ impl Record {
                 buffer.write_u16(*class)?;
                 buffer.write_u32(*ttl)?;
                 buffer.write_u16(4)?;
-                buffer.write_u8(ip[0])?;
-                buffer.write_u8(ip[1])?;
-                buffer.write_u8(ip[2])?;
-                buffer.write_u8(ip[3])?;
+                ip.octets().iter().try_for_each(|x| buffer.write_u8(*x))?;
             }
 
             Record::NS {
